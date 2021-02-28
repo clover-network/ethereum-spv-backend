@@ -31,7 +31,7 @@ func verifyTransaction(w http.ResponseWriter, r *http.Request) {
 
 func handleRequests() {
 	myRouter := mux.NewRouter().StrictSlash(true)
-	myRouter.HandleFunc("/verify/{id}", verifyTransaction)
+	myRouter.HandleFunc("/merklepath/{id}", verifyTransaction)
 	log.Fatal(http.ListenAndServe(":10000", myRouter))
 }
 
