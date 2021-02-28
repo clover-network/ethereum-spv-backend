@@ -17,7 +17,7 @@ func verifyTransaction(w http.ResponseWriter, r *http.Request) {
 
 	_, merklePath, err := controller.VerifyTransaction(txID)
 	if err != nil {
-		log.Fatal(err)
+		merklePath = nil
 	}
 
 	m := make(map[string]string)
