@@ -5,96 +5,96 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"log"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rlp"
-
-	"github.com/clover-network/ethereum-spv-backend/app/merkle"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
-func VerifyTransaction(txID string) (bool, map[string][]byte, error) {
+func GetDerive(txID string) {
 	ctx := context.Background()
 	client, err := ethclient.Dial("https://kovan.infura.io/v3/0f818347f004401992c6c63df1c85bf3")
 	if err != nil {
-		return false, nil, err
+		log.Fatal(err)
 	}
 
 	txHash := common.HexToHash(txID)
-	tx, _, err := client.TransactionByHash(ctx, txHash)
-	if err != nil {
-		return false, nil, err
-	}
 
 	receipt, err := client.TransactionReceipt(ctx, txHash)
 	if err != nil {
-		return false, nil, err
+		log.Fatal(err)
 	}
 	blockHash := receipt.BlockHash
-	txCount, err := client.TransactionCount(ctx, blockHash)
-	if err != nil {
-		return false, nil, err
-	}
-	fmt.Println("Transcation count: ", txCount)
-	fmt.Println(receipt.BlockNumber)
-
-	trie := merkle.NewTrie()
-	var txIndex uint
-
-	for i := uint(0); i < txCount; i++ {
-		t, err := client.TransactionInBlock(ctx, blockHash, i)
-		if err != nil {
-			return false, nil, err
-		}
-		if t.Hash().Hex() == txID {
-			txIndex = i
-		}
-
-		key, err := rlp.EncodeToBytes(i)
-		if err != nil {
-			return false, nil, err
-		}
-		rlp, err := rlp.EncodeToBytes(t)
-		if err != nil {
-			return false, nil, err
-		}
-		fmt.Println(i)
-		trie.Put(key, rlp)
-	}
-
-	key, err := rlp.EncodeToBytes(txIndex)
-	if err != nil {
-		return false, nil, err
-	}
-
-	proof, merklePath, found := trie.Prove(key)
-	if !found {
-		return false, nil, nil
-	}
 
 	block, err := client.BlockByHash(ctx, blockHash)
 	if err != nil {
-		return false, nil, err
+		log.Fatal(err)
 	}
 	header := block.Header()
 	transactionRoot, err := hex.DecodeString(header.TxHash.Hex()[2:])
 	if err != nil {
-		return false, nil, err
+		log.Fatal(err)
 	}
-	txRLP, err := merkle.VerifyProof(transactionRoot, key, proof)
-	if err != nil {
-		return false, nil, err
-	}
+	fmt.Printf("tx Root: %x\n", transactionRoot)
+	fmt.Println("tx Root: ", transactionRoot)
 
-	// verify that if the verification passes, it returns the RLP encoded transaction
-	rlp, err := merkle.FromEthTransaction(tx).GetRLP()
-	if err != nil {
-		return false, nil, err
-	}
+	txs := block.Transactions()
+	trie := new(trie.Trie)
 
-	result := bytes.Compare(txRLP, rlp)
-	if result == 0 {
-		return true, merklePath, nil
+	h := types.DeriveSha(txs, trie)
+	fmt.Println("Trie hash: ", h.Hex())
+	fmt.Println("Tx 0: ", txs[0].Hash().Hex())
+
+	key, err := rlp.EncodeToBytes(uint(1))
+	if err != nil {
+		log.Fatal(err)
 	}
-	return false, merklePath, nil
+	v := trie.Get(key)
+	fmt.Printf("value: %x \n", v)
+
+	it := trie.NodeIterator(key)
+
+	for it.Next(true) {
+		if it.Leaf() {
+			var t *types.Transaction
+			err = rlp.DecodeBytes(it.LeafBlob(), &t)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if t.Hash().Hex() == txID {
+				fmt.Println("Leaf Blob: ", t.Hash().Hex())
+				proof := it.LeafProof()
+				fmt.Printf("Leaf Proof: %x", proof)
+				fmt.Println("Proof length: ", len(proof))
+
+				buf := new(bytes.Buffer)
+				err := t.EncodeRLP(buf)
+				if err != nil {
+					log.Fatal(err)
+				}
+				fmt.Printf("Data: %x \n", buf.Bytes())
+				hash := crypto.Keccak256(buf.Bytes())
+				fmt.Printf("Keccak: %x \n", hash)
+
+				var val *[][]byte
+				err = rlp.DecodeBytes(buf.Bytes(), &val)
+				if err != nil {
+					log.Fatal(err)
+				}
+				fmt.Printf("Value: 0x%x \n", val)
+				fmt.Println("############################### Merkle Path ###############################")
+
+				for _, rawBytes := range proof {
+					hash := crypto.Keccak256(rawBytes)
+					fmt.Printf("%x: ", hash)
+
+					fmt.Printf(" %x \n", rawBytes)
+				}
+			}
+		}
+	}
 }
